@@ -93,10 +93,15 @@ complete release archives in the project's official Docker toolchain.
 
 A separate copy of an installed Windows build was observed for 30 seconds without
 a window. Its relocated Progress/Save object offsets agree with these source
-layouts. That run validates object identity in the installed build, not execution
-of this modified executable. Changed client/game modules and the settings UI have
-been compiled or syntax checked; full game build and live-account acceptance are
-still required before treating this branch as release-ready.
+layouts. The modified executable at commit `4c3a892` was subsequently built for
+Windows and Linux by the complete release workflow (run `40053794686`), which
+also passed all offline tests. Its Windows binary ran headlessly for 30 seconds
+with isolated saves and a copy of the player's original data: original-data
+verification passed, 1,784 vertical blanks elapsed, all 12 expected memory regions
+were registered, and the executable hash was
+`18df2548cc72b98287170b19f73c502b`. No account login or real award was attempted.
+Interactive settings UI and live-account acceptance are still required before
+treating this branch as release-ready.
 
 References: [rc_client integration](https://github.com/RetroAchievements/rcheevos/wiki/rc_client-integration),
 [PS2 game page](https://retroachievements.org/game/20590), issues
