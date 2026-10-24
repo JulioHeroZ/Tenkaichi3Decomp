@@ -1,5 +1,8 @@
 /* Optional reference-set validation: real adapter/client/runtime, fake HTTPS.
  * Uses only synthetic game objects and a caller-supplied public patch file. */
+#ifndef _WIN32
+#define _GNU_SOURCE 1 /* mmap MAP_32BIT on the x86-64 Linux test host */
+#endif
 #include "ra_client.h"
 #include "ra_game.h"
 #include <SDL3/SDL.h>
