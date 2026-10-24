@@ -1709,6 +1709,10 @@ static void achievements_tab(void) {
         }
         ImGui::EndDisabled();
         if (ra.logging_in) ImGui::TextUnformatted("Signing in...");
+        if (ra.enabled && ImGui::Button("Disable RetroAchievements")) {
+            RaClient_RequestLogout();
+            ra_clear_password();
+        }
         ImGui::TextWrapped("Credentials are sent directly to RetroAchievements over HTTPS. Password and session token are not saved to disk.");
         if (ImGui::Button("Create a RetroAchievements account")) SDL_OpenURL("https://retroachievements.org/createaccount.php");
     }
@@ -1745,21 +1749,31 @@ static void cheats_tab(void) {
     ImGui::Spacing();
     ImGui::TextWrapped("It also empties your records list, and it becomes permanent the next time the game saves. "
                        "Use it after your save has been loaded (from the main menu on).");
+    RaClientStatus ra;
+    RaClient_GetStatus(&ra);
+    bool ra_active = ra.enabled || ra.logging_in || ra.logged_in;
+    ImGui::TextWrapped("Using this option disables RetroAchievements for this save folder, including after restarting the game.");
+    if (ra_active) ImGui::TextWrapped("Sign out of RetroAchievements before using Unlock Everything.");
     ImGui::Spacing();
+    ImGui::BeginDisabled(ra_active);
     if (ImGui::Button("Unlock everything...")) {
         ImGui::OpenPopup("Unlock everything?");
     }
+    ImGui::EndDisabled();
     if (gPortUnlockDone) {
         ImGui::SameLine();
         ImGui::TextUnformatted("Done.");
     }
     if (ImGui::BeginPopupModal("Unlock everything?", NULL, ImGuiWindowFlags_AlwaysAutoResize)) {
         ImGui::TextUnformatted("Your records list will be emptied. This cannot be undone once the game saves.");
+        ImGui::TextWrapped("RetroAchievements will remain disabled for this save folder after restart.");
         ImGui::Spacing();
+        ImGui::BeginDisabled(ra_active);
         if (ImGui::Button("Unlock", ImVec2(U(140.0f), 0.0f))) {
             gPortUnlockAll = 1;
             ImGui::CloseCurrentPopup();
         }
+        ImGui::EndDisabled();
         ImGui::SameLine();
         if (ImGui::Button("Cancel", ImVec2(U(140.0f), 0.0f))) {
             ImGui::CloseCurrentPopup();

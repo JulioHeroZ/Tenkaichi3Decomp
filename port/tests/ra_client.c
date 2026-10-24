@@ -15,7 +15,7 @@ static const char *patch = "{\"Success\":true,\"GameId\":1234,\"Title\":\"Offlin
     "\"ImageIconUrl\":\"https://invalid.test/icon.png\",\"RichPresenceGameId\":1234,\"RichPresencePatch\":\"\","
     "\"Sets\":[{\"AchievementSetId\":1111,\"GameId\":1234,\"Title\":null,\"Type\":\"core\","
     "\"ImageIconUrl\":\"https://invalid.test/icon.png\",\"Achievements\":["
-    ACH("1", "0xH0000=1") "," ACH("2", "0xHFFFF=1") "],\"Leaderboards\":[{"
+    ACH("1", "0xH0000=1") "," ACH("2", "0xHFFFF=1") "," ACH("4", "0xH0001=1") "],\"Leaderboards\":[{"
     "\"ID\":3,\"Title\":\"Fixture leaderboard\",\"Description\":\"Local\","
     "\"Mem\":\"STA:0xH0000=1::CAN:0=1::SUB:1=1::VAL:0xH0000\",\"Format\":\"SCORE\"}]}]}";
 static const char *transport(const char *url, const char *post, int *status, void *unused) {
@@ -81,7 +81,7 @@ int main(void) {
     assert(RaClient_RequestLogin("Alice", "fake"));
     assert(!RaClient_RequestLogin("Bob", "fake"));
     status = wait_loaded();
-    assert(!strcmp(status.username, "Alice") && status.total == 2 && status.unsupported == 1);
+    assert(!strcmp(status.username, "Alice") && status.total == 3 && status.unsupported == 1);
     assert(status.unlocked == 0);
     for (i = 0; i < 3; ++i) tick(1); /* leave the runtime's initial waiting state while false */
     ram[0] = 1; status = tick(1);
@@ -94,6 +94,7 @@ int main(void) {
     assert(SDL_GetAtomicInt(&awards) == 2);
     status = tick(0); assert(!status.game_loaded && !status.eligible);
     before = SDL_GetAtomicInt(&awards);
+    ram[1] = 1; /* a still-locked condition becomes true while processing is blocked */
     for (i = 0; i < 10; ++i) tick(0);
     assert(SDL_GetAtomicInt(&awards) == before);
     RaClient_RequestLogout(); status = tick(0);
@@ -107,7 +108,7 @@ int main(void) {
     assert(SDL_GetAtomicInt(&blocked));
     RaClient_RequestLogout(); tick(0);
     assert(RaClient_RequestLogin("Bob", "fake")); tick(0);
-    SDL_SetAtomicInt(&release_login, 1); ram[0] = 0;
+    SDL_SetAtomicInt(&release_login, 1); ram[0] = ram[1] = 0;
     status = wait_loaded(); assert(!strcmp(status.username, "Bob") && status.unlocked == 0);
     assert(SDL_GetAtomicInt(&awards) == before);
     RaClient_RequestLogout(); tick(0);

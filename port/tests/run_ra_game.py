@@ -24,4 +24,9 @@ with tempfile.TemporaryDirectory(prefix="bt3-ra-game-", dir=os.environ.get("BT3_
         (data_root / "disc").mkdir(parents=True)
         (data_root / "disc/SLUS_216.78").write_bytes(data)
         expected = hashlib.md5(b"SLUS_216.78" + data).hexdigest() if name == "valid" else "invalid"
-        subprocess.run([str(executable), str(data_root), expected], check=True, timeout=10, env=clean_env)
+        environment = dict(clean_env, BT3_SAVES=str(data_root / "saves"))
+        subprocess.run([str(executable), str(data_root), expected], check=True, timeout=10, env=environment)
+        if name == "valid":
+            marker = data_root / "saves/.retroachievements-tainted"
+            assert marker.is_file() and marker.stat().st_size > 0
+            subprocess.run([str(executable), str(data_root), "tainted"], check=True, timeout=10, env=environment)

@@ -11,6 +11,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
+#include <sys/stat.h>
+#ifdef _WIN32
+#include <direct.h>
+#endif
 
 /* The game's global pointer slots are exactly four bytes on every port ABI.
  * Character aliases avoid loading them as the host's eight-byte pointers. */
@@ -31,7 +36,53 @@ extern volatile int gPortUnlockAll, gPortUnlockDone;
 static RaMemoryRegion sRegions[12];
 static RaMemory sMemory = {sRegions, 0};
 static char sHash[33];
-static int sHashTried, sTainted;
+static int sHashTried, sTainted, sTaintChecked;
+
+static int taint_path(char *path, size_t size) {
+    const char *root = getenv("BT3_SAVES");
+    int n;
+    if (!root) root = "saves";
+    n = snprintf(path, size, "%s/.retroachievements-tainted", root);
+    return n >= 0 && (size_t)n < size;
+}
+static void read_taint(void) {
+    char path[1200];
+    FILE *file;
+    if (sTaintChecked) return;
+    sTaintChecked = 1;
+    if (!taint_path(path, sizeof(path))) { sTainted = 1; return; }
+    errno = 0;
+    file = fopen(path, "rb");
+    if (file) { sTainted = 1; fclose(file); }
+    else if (errno != ENOENT) sTainted = 1; /* cannot establish a clean save folder */
+}
+int PortRa_BeforeUnlockAll(void) {
+    static const char marker[] = "Unlock Everything: RetroAchievements disabled for this save folder.\n";
+    RaClientStatus status;
+    const char *root = getenv("BT3_SAVES");
+    char path[1200];
+    FILE *file;
+    int ok;
+    RaClient_GetStatus(&status);
+    if (status.enabled || status.logging_in || status.logged_in) return 0;
+    if (!root) root = "saves";
+    if (!taint_path(path, sizeof(path))) return 0;
+#ifdef _WIN32
+    if (_mkdir(root) != 0 && errno != EEXIST) return 0;
+#else
+    if (mkdir(root, 0755) != 0 && errno != EEXIST) return 0;
+#endif
+    file = fopen(path, "wb");
+    if (!file) return 0;
+    /* Even a partial marker fails closed. Do not mutate the save unless the
+     * complete marker was written and closed successfully. */
+    sTainted = 1;
+    sTaintChecked = 1;
+    ok = fwrite(marker, 1, sizeof(marker) - 1, file) == sizeof(marker) - 1;
+    if (fflush(file) != 0) ok = 0;
+    if (fclose(file) != 0) ok = 0;
+    return ok;
+}
 
 static uint32_t slot(const unsigned char *p) {
     uint32_t value;
@@ -103,10 +154,11 @@ void PortRa_Init(void) {
 void PortRa_Tick(void) {
     const char *reason = NULL;
     if (gPortResim) return;
+    read_taint();
     /* These flags are checked before this tick can evaluate an unlock. Taint
      * stays outside rollback memory and survives logging out for this process. */
     if (gPortUnlockAll || gPortUnlockDone) sTainted = 1;
-    if (sTainted) reason = "Unlock Everything was used. Restart with a clean save to enable achievements.";
+    if (sTainted) reason = "Unlock Everything was used in this save folder. Use a separate clean save folder for achievements.";
     else if (Port_NetSession()) reason = "Achievements are suspended during netplay.";
     else if (getenv("BT3_REPLAY") || getenv("BT3_DEMO") || getenv("BT3_PAD_PLAY") || getenv("BT3_PAD") ||
              getenv("BT3_SYNCTEST") || getenv("BT3_FILE_ALIAS")) reason = "Achievements are suspended for replay, scripted input or diagnostic runs.";

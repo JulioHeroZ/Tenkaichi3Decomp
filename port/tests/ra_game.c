@@ -20,6 +20,7 @@ static char hash[33], reason[192];
 static const char *data_root;
 static RaClientReadMemory reader;
 static void *reader_data;
+static RaClientStatus client_status;
 int Port_DataState(void) { return data_state; }
 int Port_NetSession(void) { return netplay; }
 int Port_GameSpeed(void) { return speed; }
@@ -27,6 +28,7 @@ int Port_ClashSquare(void) { return clash; }
 const char *Port_FileRoot(void) { return data_root; }
 int RaClient_Init(void) { return 1; }
 void RaClient_Shutdown(void) {}
+void RaClient_GetStatus(RaClientStatus *out) { *out = client_status; }
 void RaClient_Tick(RaClientReadMemory read, void *data, const char *game_hash, int allowed, const char *blocked) {
     reader = read; reader_data = data; eligible = allowed; ++calls;
     snprintf(hash, sizeof(hash), "%s", game_hash);
@@ -53,6 +55,10 @@ int main(int argc, char **argv) {
     memory[0x1000 + 0x3029] = 0x56;
     gLoadScreen[0xa] = 0x55;
     PortRa_Init(); PortRa_Tick();
+    if (!strcmp(argv[2], "tainted")) {
+        assert(!eligible && strstr(reason, "save folder"));
+        puts("ra_game: cheat marker blocks achievements after process restart"); return 0;
+    }
     if (!strcmp(argv[2], "invalid")) {
         assert(!eligible && !hash[0] && strstr(reason, "identify"));
         puts("ra_game: invalid/empty executable rejected"); return 0;
@@ -72,6 +78,11 @@ int main(int argc, char **argv) {
     gProgress = 0; PortRa_Tick(); assert(!eligible); gProgress = saved_progress;
     before = calls; gPortResim = 1; PortRa_Tick(); assert(calls == before); gPortResim = 0;
     PortRa_Tick(); assert(eligible);
+    client_status.logged_in = 1;
+    assert(!PortRa_BeforeUnlockAll()); /* cannot mutate a save in an active RA session */
+    client_status.logged_in = 0;
+    assert(PortRa_BeforeUnlockAll()); /* marker persisted BEFORE the debug mutation */
+    PortRa_Tick(); assert(!eligible);
     gPortUnlockAll = 1; PortRa_Tick(); assert(!eligible);
     gPortUnlockAll = 0; PortRa_Tick(); assert(!eligible && strstr(reason, "Unlock Everything"));
     puts("ra_game: identity mapping/hash/lifecycle/unsupported/cheat latch passed");
