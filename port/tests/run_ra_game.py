@@ -30,3 +30,10 @@ with tempfile.TemporaryDirectory(prefix="bt3-ra-game-", dir=os.environ.get("BT3_
             marker = data_root / "saves/.retroachievements-tainted"
             assert marker.is_file() and marker.stat().st_size > 0
             subprocess.run([str(executable), str(data_root), "tainted"], check=True, timeout=10, env=environment)
+            switched = dict(clean_env, BT3_SAVES=str(data_root / "temporary-clean-saves"))
+            subprocess.run([str(executable), str(data_root), "root-switch"], check=True, timeout=10, env=switched)
+            blocked_root = data_root / "blocked-save-root"
+            blocked_root.write_bytes(b"existing file, not a save directory")
+            blocked = dict(clean_env, BT3_SAVES=str(blocked_root))
+            subprocess.run([str(executable), str(data_root), "write-failure"], check=True, timeout=10, env=blocked)
+            assert blocked_root.read_bytes() == b"existing file, not a save directory"

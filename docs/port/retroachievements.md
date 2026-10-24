@@ -53,6 +53,8 @@ including a pending login. Before the debug function can mutate the save, a
 `BT3_SAVES`). If that write fails, the debug operation is canceled. The marker
 blocks achievement processing for that save folder across process restarts and
 account changes; a separate clean save folder is required for achievements.
+The marker is checked again when the save root changes (including netplay's
+temporary save-folder switch).
 This records uses of the option in this build, not the provenance of older saves.
 No network request is made until the player explicitly signs in. Signing out
 unloads the game and clears account status; responses for an aborted account are
@@ -88,7 +90,8 @@ synthetic native objects. It checks actual Save/Progress/loading reads, rejects
 unmapped transient objects and pointer fields, compares the executable hash with
 Python's independent hashlib result, rejects invalid/empty executables, and
 checks data-verification/netplay/speed/clash/rollback/Unlock Everything gates,
-refusal during an active account session and the taint marker in a new process.
+refusal during an active account session, marker-write failure, the taint marker
+in a new process and rechecking it after restoring another save folder.
 It requires an x86-64 Linux or Windows host, but no disc, SDL or account.
 
 `.github/workflows/retroachievements.yml` runs all offline checks and builds both

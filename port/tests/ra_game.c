@@ -4,6 +4,7 @@
 #include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #ifdef _WIN32
 #include <windows.h>
@@ -55,6 +56,23 @@ int main(int argc, char **argv) {
     memory[0x1000 + 0x3029] = 0x56;
     gLoadScreen[0xa] = 0x55;
     PortRa_Init(); PortRa_Tick();
+    if (!strcmp(argv[2], "root-switch")) {
+        char saves[1200];
+        assert(eligible);
+        snprintf(saves, sizeof(saves), "%s/saves", data_root);
+#ifdef _WIN32
+        assert(_putenv_s("BT3_SAVES", saves) == 0);
+#else
+        assert(setenv("BT3_SAVES", saves, 1) == 0);
+#endif
+        PortRa_Tick();
+        assert(!eligible && strstr(reason, "save folder"));
+        puts("ra_game: restored save folder is checked for a cheat marker"); return 0;
+    }
+    if (!strcmp(argv[2], "write-failure")) {
+        assert(!PortRa_BeforeUnlockAll());
+        puts("ra_game: unwritable marker cancels Unlock Everything"); return 0;
+    }
     if (!strcmp(argv[2], "tainted")) {
         assert(!eligible && strstr(reason, "save folder"));
         puts("ra_game: cheat marker blocks achievements after process restart"); return 0;

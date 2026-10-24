@@ -37,6 +37,7 @@ static RaMemoryRegion sRegions[12];
 static RaMemory sMemory = {sRegions, 0};
 static char sHash[33];
 static int sHashTried, sTainted, sTaintChecked;
+static char sTaintPath[1200];
 
 static int taint_path(char *path, size_t size) {
     const char *root = getenv("BT3_SAVES");
@@ -48,9 +49,12 @@ static int taint_path(char *path, size_t size) {
 static void read_taint(void) {
     char path[1200];
     FILE *file;
-    if (sTaintChecked) return;
-    sTaintChecked = 1;
     if (!taint_path(path, sizeof(path))) { sTainted = 1; return; }
+    /* Netplay temporarily changes BT3_SAVES. A check made in its temporary
+     * folder must not hide a marker in the restored local save folder. */
+    if (sTaintChecked && !strcmp(path, sTaintPath)) return;
+    sTaintChecked = 1;
+    memcpy(sTaintPath, path, strlen(path) + 1);
     errno = 0;
     file = fopen(path, "rb");
     if (file) { sTainted = 1; fclose(file); }
