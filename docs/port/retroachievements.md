@@ -60,6 +60,7 @@ from rollback snapshots. Release packaging includes the library/MD5 notices.
 clang -std=c99 -Wall -Wextra -Werror port/src/ra_memory.c port/tests/ra_memory.c -o ra_memory_test
 ./ra_memory_test
 python port/tests/run_ra_client.py
+python port/tests/run_ra_game.py
 ```
 
 The client test compiles the real runtime with a fake transport and no native
@@ -72,6 +73,16 @@ an installation. `BT3_TEST_TMPDIR` selects a writable test output directory.
 The memory test checks relocation, partial pointer reads, non-pointer integers,
 null pointers, adjacent regions, holes, malformed descriptors, overflow and
 preserving the destination on failure.
+
+The game-adapter test runs production mapping and identification code against
+synthetic native objects. It checks actual Save/Progress/loading reads, rejects
+unmapped transient objects and pointer fields, compares the executable hash with
+Python's independent hashlib result, rejects invalid/empty executables, and
+checks data-verification/netplay/speed/clash/rollback/Unlock Everything gates.
+It requires an x86-64 Linux or Windows host, but no disc, SDL or account.
+
+`.github/workflows/retroachievements.yml` runs all offline checks and builds both
+complete release archives in the project's official Docker toolchain.
 
 A separate copy of an installed Windows build was observed for 30 seconds without
 a window. Its relocated Progress/Save object offsets agree with these source

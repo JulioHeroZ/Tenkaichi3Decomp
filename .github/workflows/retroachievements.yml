@@ -7,7 +7,7 @@ on:
       - '.github/workflows/retroachievements.yml'
       - 'port/src/**'
       - 'port/tests/ra_*'
-      - 'port/tests/run_ra_client.py'
+      - 'port/tests/run_ra_*.py'
       - 'port/tools/**'
       - 'port/third_party/rcheevos/**'
   pull_request:
@@ -15,7 +15,7 @@ on:
       - '.github/workflows/retroachievements.yml'
       - 'port/src/**'
       - 'port/tests/ra_*'
-      - 'port/tests/run_ra_client.py'
+      - 'port/tests/run_ra_*.py'
       - 'port/tools/**'
       - 'port/third_party/rcheevos/**'
   workflow_dispatch:
@@ -48,6 +48,7 @@ jobs:
             cc -std=c99 -Wall -Wextra -Werror port/src/ra_memory.c port/tests/ra_memory.c -o port/build/ra_memory_test
             port/build/ra_memory_test
             python3 port/tests/run_ra_client.py
+            python3 port/tests/run_ra_game.py
           '
       - name: Build complete Linux and Windows archives
         run: |
