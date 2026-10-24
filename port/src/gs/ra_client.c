@@ -358,6 +358,17 @@ void RaClient_RequestLogout(void) {
     erase(sRA.password, sizeof(sRA.password));
     SDL_UnlockMutex(sRA.lock);
 }
+int RaClient_RequestRetry(void) {
+    int ok = 0;
+    if (!sRA.lock) return 0;
+    SDL_LockMutex(sRA.lock);
+    if (!sRA.command && sRA.st.logged_in && sRA.st.eligible &&
+        !sRA.st.loading && !sRA.st.game_loaded) {
+        sRA.command = 3; ok = 1;
+    }
+    SDL_UnlockMutex(sRA.lock);
+    return ok;
+}
 void RaClient_GetStatus(RaClientStatus *status) {
     if (!status) return;
     if (!sRA.lock) { memset(status, 0, sizeof(*status)); return; }
@@ -409,6 +420,10 @@ void RaClient_Tick(RaClientReadMemory read, void *userdata, const char *hash,
             sRA.attempted_hash[0] = 0;
             sRA.login = rc_client_begin_login_with_password(sRA.client, username, password, login_done, NULL);
         }
+    }
+    if (command == 3) {
+        sRA.attempted_hash[0] = 0;
+        SDL_LockMutex(sRA.lock); sRA.st.error[0] = 0; SDL_UnlockMutex(sRA.lock);
     }
     erase(password, sizeof(password));
     /* Stop evaluation before delivering a load response from a now unsafe frame. */

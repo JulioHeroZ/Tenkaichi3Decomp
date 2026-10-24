@@ -1723,6 +1723,8 @@ static void achievements_tab(void) {
     }
     if (ra.blocked_reason[0]) ImGui::TextWrapped("%s", ra.blocked_reason);
     if (ra.error[0]) ImGui::TextWrapped("%s", ra.error);
+    if (ra.logged_in && ra.eligible && !ra.loading && !ra.game_loaded &&
+        ImGui::Button("Retry loading achievements")) RaClient_RequestRetry();
     ImGui::TextWrapped("Hardcore and leaderboards are disabled. A modified game, scripted replay, netplay, Unlock Everything, altered game speed or clash assistance suspends achievement processing.");
 }
 

@@ -4,6 +4,8 @@ This branch integrates online accounts through the official rcheevos `rc_client`
 F1 > Achievements offers sign-in/sign-out, game status, unlocked counts and
 unsupported counts. Unlocks produce an on-screen notification. This is an initial
 **softcore-only** implementation; hardcore and leaderboard tracking are disabled.
+If the game set fails to load after sign-in, **Retry loading achievements** retries
+that operation using the current session, without asking for the password again.
 
 ## Scope
 
@@ -72,7 +74,8 @@ python port/tests/run_ra_game.py
 The client test compiles the real runtime with a fake transport and no native
 network implementation. It checks login, unsupported reads, a local fixture
 unlock, retry after connection failure, softcore flags, cancellation, account
-isolation and shutdown. It never contacts RetroAchievements or awards a real
+isolation, game-load failure recovery without a second login and shutdown.
+It never contacts RetroAchievements or awards a real
 account. SDL3 and a C compiler are required; `SDL3_CFLAGS` and `SDL3_LIBS` can select
 an installation. `BT3_TEST_TMPDIR` selects a writable test output directory.
 

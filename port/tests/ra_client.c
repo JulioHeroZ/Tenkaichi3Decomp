@@ -7,6 +7,7 @@
 #include <string.h>
 
 static SDL_AtomicInt calls, awards, blocked, release_login, block_login;
+static SDL_AtomicInt fail_load, login_calls;
 static uint8_t ram[16];
 static uint64_t clock_ms = 1000;
 static const char *hash = "0123456789abcdef0123456789abcdef";
@@ -24,6 +25,7 @@ static const char *transport(const char *url, const char *post, int *status, voi
     assert(post != NULL);
     SDL_AddAtomicInt(&calls, 1); *status = 200;
     if (strstr(post, "r=login2")) {
+        SDL_AddAtomicInt(&login_calls, 1);
         if (strstr(post, "u=Alice")) {
             if (SDL_GetAtomicInt(&block_login)) {
                 SDL_SetAtomicInt(&blocked, 1);
@@ -35,7 +37,13 @@ static const char *transport(const char *url, const char *post, int *status, voi
             return "{\"Success\":true,\"User\":\"Bob\",\"Token\":\"fake-b\",\"Score\":0,\"SoftcoreScore\":0,\"Messages\":0}";
         return "{\"Success\":false,\"Error\":\"fixture rejection\"}";
     }
-    if (strstr(post, "r=achievementsets")) return patch;
+    if (strstr(post, "r=achievementsets")) {
+        if (SDL_GetAtomicInt(&fail_load)) {
+            SDL_SetAtomicInt(&fail_load, 0);
+            return "{\"Success\":false,\"Error\":\"Fixture load failure\"}";
+        }
+        return patch;
+    }
     if (strstr(post, "r=startsession")) {
         assert(strstr(post, "&h=0"));
         return "{\"Success\":true,\"Unlocks\":[],\"HardcoreUnlocks\":[]}";
@@ -77,10 +85,22 @@ int main(void) {
     RaClient_TestTransport(transport, NULL);
     assert(RaClient_Init());
     status = tick(0); assert(status.available && !status.enabled && !status.game_loaded);
+    assert(!RaClient_RequestRetry());
     assert(!RaClient_RequestLogin("", "fake"));
+    SDL_SetAtomicInt(&fail_load, 1);
     assert(RaClient_RequestLogin("Alice", "fake"));
     assert(!RaClient_RequestLogin("Bob", "fake"));
+    for (i = 0; i < 3000; ++i) {
+        status = tick(1);
+        if (status.logged_in && status.error[0] && !status.loading) break;
+        SDL_Delay(1);
+    }
+    assert(status.logged_in && status.error[0] && !status.game_loaded);
+    assert(RaClient_RequestRetry());
+    assert(!RaClient_RequestRetry());
     status = wait_loaded();
+    assert(SDL_GetAtomicInt(&login_calls) == 1); /* same account/token, no password retry */
+    assert(!RaClient_RequestRetry());
     assert(!strcmp(status.username, "Alice") && status.total == 3 && status.unsupported == 1);
     assert(status.unlocked == 0);
     for (i = 0; i < 3; ++i) tick(1); /* leave the runtime's initial waiting state while false */

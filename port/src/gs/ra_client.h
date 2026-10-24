@@ -26,6 +26,8 @@ void RaClient_Shutdown(void);
  * Caller should clear its own password buffer after this call. */
 int RaClient_RequestLogin(const char *username, const char *password);
 void RaClient_RequestLogout(void);
+/* Retry a failed game load without resending the player's password. */
+int RaClient_RequestRetry(void);
 void RaClient_GetStatus(RaClientStatus *status);
 /* Call once per emulated frame, including idle frames. hash must be the verified
  * 32-digit RA hash of the player's original executable. eligible must remain 0
