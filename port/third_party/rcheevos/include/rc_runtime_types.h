@@ -85,6 +85,9 @@ struct rc_memref_t {
 
   /* The memory address of this variable. */
   uint32_t address;
+  /* Native-port rc_client extension: 1 unavailable, 2 first restored frame.
+   * Not part of serialized progress and never an emulated memory value. */
+  uint8_t unavailable;
 };
 
 /*****************************************************************************\

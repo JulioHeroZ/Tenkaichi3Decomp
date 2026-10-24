@@ -4,11 +4,15 @@
 #include <SDL3/SDL.h>
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static SDL_AtomicInt calls, awards, blocked, release_login, block_login;
 static SDL_AtomicInt fail_load, login_calls;
+static SDL_AtomicInt award_ids[9];
 static uint8_t ram[16];
+static uint8_t transient_ram[16];
+static int transient_available;
 static uint64_t clock_ms = 1000;
 static const char *hash = "0123456789abcdef0123456789abcdef";
 #define ACH(ID, ADDR) "{\"ID\":" ID ",\"Title\":\"Fixture\",\"Description\":\"Local only\",\"Flags\":3,\"Points\":5,\"MemAddr\":\"" ADDR "\",\"Author\":\"Test\",\"Created\":1,\"Modified\":1,\"BadgeName\":\"00001\"}"
@@ -16,7 +20,11 @@ static const char *patch = "{\"Success\":true,\"GameId\":1234,\"Title\":\"Offlin
     "\"ImageIconUrl\":\"https://invalid.test/icon.png\",\"RichPresenceGameId\":1234,\"RichPresencePatch\":\"\","
     "\"Sets\":[{\"AchievementSetId\":1111,\"GameId\":1234,\"Title\":null,\"Type\":\"core\","
     "\"ImageIconUrl\":\"https://invalid.test/icon.png\",\"Achievements\":["
-    ACH("1", "0xH0000=1") "," ACH("2", "0xHFFFF=1") "," ACH("4", "0xH0001=1") "],\"Leaderboards\":[{"
+    ACH("1", "0xH0000=1") "," ACH("2", "0xHFFFF=1") "," ACH("4", "0xH0001=1") ","
+    ACH("5", "d0xX000100>0_0xX000100=0") ","
+    ACH("6", "d0xX000104=89_0xX000104=95") ","
+    ACH("7", "0xH000108=1.2.") ","
+    ACH("8", "A:0xH00010c_0xH00010d=2") "],\"Leaderboards\":[{"
     "\"ID\":3,\"Title\":\"Fixture leaderboard\",\"Description\":\"Local\","
     "\"Mem\":\"STA:0xH0000=1::CAN:0=1::SUB:1=1::VAL:0xH0000\",\"Format\":\"SCORE\"}]}]}";
 static const char *transport(const char *url, const char *post, int *status, void *unused) {
@@ -49,10 +57,16 @@ static const char *transport(const char *url, const char *post, int *status, voi
         return "{\"Success\":true,\"Unlocks\":[],\"HardcoreUnlocks\":[]}";
     }
     if (strstr(post, "r=awardachievement")) {
+        static char response[200];
+        const char *id_field = strstr(post, "&a=");
+        int id = id_field ? atoi(id_field + 3) : 0;
+        assert(id > 0 && id < 9);
         assert(strstr(post, "&h=0"));
         assert(strstr(post, "&u=Alice") || strstr(post, "u=Alice&"));
         if (SDL_AddAtomicInt(&awards, 1) == 0) { *status = -2; return ""; }
-        return "{\"Success\":true,\"Score\":0,\"SoftcoreScore\":5,\"AchievementID\":1,\"AchievementsRemaining\":1}";
+        SDL_AddAtomicInt(&award_ids[id], 1);
+        snprintf(response, sizeof(response), "{\"Success\":true,\"Score\":0,\"SoftcoreScore\":5,\"AchievementID\":%d,\"AchievementsRemaining\":1}", id);
+        return response;
     }
     if (strstr(post, "r=ping")) return "{\"Success\":true}";
     assert(!"unexpected API request (including a leaderboard submission)");
@@ -60,6 +74,10 @@ static const char *transport(const char *url, const char *post, int *status, voi
 }
 static uint32_t read_memory(uint32_t address, uint8_t *buffer, uint32_t bytes, void *unused) {
     (void)unused;
+    if (address >= 0x100 && address < 0x110 && bytes <= 0x110 - address) {
+        if (!transient_available) return RA_MEMORY_UNAVAILABLE;
+        memcpy(buffer, transient_ram + address - 0x100, bytes); return bytes;
+    }
     if (address >= sizeof(ram) || bytes > sizeof(ram) - address) return 0;
     memcpy(buffer, ram + address, bytes); return bytes;
 }
@@ -101,7 +119,7 @@ int main(void) {
     status = wait_loaded();
     assert(SDL_GetAtomicInt(&login_calls) == 1); /* same account/token, no password retry */
     assert(!RaClient_RequestRetry());
-    assert(!strcmp(status.username, "Alice") && status.total == 3 && status.unsupported == 1);
+    assert(!strcmp(status.username, "Alice") && status.total == 7 && status.unsupported == 1);
     assert(status.unlocked == 0);
     for (i = 0; i < 3; ++i) tick(1); /* leave the runtime's initial waiting state while false */
     ram[0] = 1; status = tick(1);
@@ -112,6 +130,42 @@ int main(void) {
         clock_ms += 1000; tick(1); SDL_Delay(1);
     }
     assert(SDL_GetAtomicInt(&awards) == 2);
+    /* Destroying objects must not look like health dropping to zero or a
+     * dialogue transition. Recreating at zero must not inherit the old delta. */
+    transient_ram[0] = 100; transient_ram[4] = 89; transient_available = 1;
+    for (i = 0; i < 4; ++i) tick(1);
+    transient_available = 0;
+    memset(transient_ram, 0, sizeof(transient_ram));
+    for (i = 0; i < 4; ++i) tick(1);
+    transient_available = 1; transient_ram[4] = 95;
+    for (i = 0; i < 4; ++i) tick(1);
+    assert(SDL_GetAtomicInt(&awards) == 2);
+    transient_ram[0] = 100; transient_ram[4] = 89;
+    for (i = 0; i < 3; ++i) tick(1);
+    transient_ram[0] = 0; transient_ram[4] = 95;
+    for (i = 0; i < 3000 && (!SDL_GetAtomicInt(&award_ids[5]) || !SDL_GetAtomicInt(&award_ids[6])); ++i) {
+        tick(1); SDL_Delay(1);
+    }
+    assert(SDL_GetAtomicInt(&award_ids[5]) == 1 && SDL_GetAtomicInt(&award_ids[6]) == 1);
+    transient_ram[8] = 1; tick(1); /* one hit must not carry into another object */
+    transient_available = 0; tick(1);
+    transient_available = 1; transient_ram[8] = 0;
+    for (i = 0; i < 3; ++i) tick(1);
+    transient_ram[8] = 1; tick(1);
+    assert(!SDL_GetAtomicInt(&award_ids[7]));
+    for (i = 0; i < 3000 && !SDL_GetAtomicInt(&award_ids[7]); ++i) { tick(1); SDL_Delay(1); }
+    assert(SDL_GetAtomicInt(&award_ids[7]) == 1);
+    transient_available = 0; transient_ram[12] = transient_ram[13] = 1;
+    for (i = 0; i < 3; ++i) tick(1);
+    assert(!SDL_GetAtomicInt(&award_ids[8]));
+    transient_available = 1;
+    for (i = 0; i < 3; ++i) tick(1); /* initially true must remain in WAITING */
+    assert(!SDL_GetAtomicInt(&award_ids[8]));
+    transient_ram[12] = transient_ram[13] = 0;
+    for (i = 0; i < 3; ++i) tick(1);
+    transient_ram[12] = transient_ram[13] = 1;
+    for (i = 0; i < 3000 && !SDL_GetAtomicInt(&award_ids[8]); ++i) { tick(1); SDL_Delay(1); }
+    assert(SDL_GetAtomicInt(&award_ids[8]) == 1);
     status = tick(0); assert(!status.game_loaded && !status.eligible);
     before = SDL_GetAtomicInt(&awards);
     ram[1] = 1; /* a still-locked condition becomes true while processing is blocked */
@@ -138,6 +192,6 @@ int main(void) {
     RaClient_Shutdown();
     assert(SDL_GetAtomicInt(&calls) > 5);
     assert(RaClient_Init()); RaClient_Shutdown();
-    puts("ra_client: offline login/load/unsupported/award retry/cancellation/account isolation passed");
+    puts("ra_client: login/load recovery/unsupported/lifetime and delta safety/legitimate awards/retry/account isolation passed");
     return 0;
 }

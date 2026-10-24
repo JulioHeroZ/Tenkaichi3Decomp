@@ -10,6 +10,8 @@ import shlex
 import shutil
 import subprocess
 import tempfile
+import sys
+import json
 
 root = Path(__file__).resolve().parents[2]
 cc = shlex.split(os.environ.get("CC", "gcc"), posix=os.name != "nt")
@@ -31,6 +33,11 @@ else:
     libs += ["-lm", "-pthread"]
 ra = root / "port/third_party/rcheevos"
 sources = [root / "port/tests/ra_client.c", root / "port/src/gs/ra_client.c"]
+reference = None
+if len(sys.argv) > 1:
+    reference = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))["PatchData"]
+    sources[0] = root / "port/tests/ra_reference.c"
+    sources += [root / "port/src/gs/ra_game.c", root / "port/src/ra_memory.c"]
 sources += [ra / "src" / (name + ".c") for name in ("rc_client", "rc_compat", "rc_util", "rc_version")]
 sources += list((ra / "src/rapi").glob("*.c")) + list((ra / "src/rcheevos").glob("*.c"))
 sources += [ra / "src/rhash/md5.c"]
@@ -39,4 +46,22 @@ with tempfile.TemporaryDirectory(prefix="bt3-ra-test-", dir=os.environ.get("BT3_
     command = cc + ["-std=c11", "-DRC_DISABLE_LUA", "-DRA_CLIENT_TEST",
                     "-I" + str(root / "port/src/gs"), "-I" + str(ra / "include")]
     subprocess.run(command + cflags + list(map(str, sources)) + libs + ["-o", str(executable)], check=True)
-    subprocess.run([str(executable)], check=True, timeout=30)
+    arguments = [str(executable)]
+    environment = None
+    if reference:
+        achievements = [a for a in reference["Achievements"] if a["ID"] != 101000001]
+        award = next(a["ID"] for a in achievements if a["Title"] == "World Tournament Champ")
+        response = {"Success": True, "GameId": reference["ID"], "Title": reference["Title"],
+                    "ConsoleId": reference["ConsoleID"], "ImageIconUrl": reference["ImageIconURL"],
+                    "RichPresenceGameId": reference["ID"], "RichPresencePatch": "",
+                    "Sets": [{"AchievementSetId": 1111, "GameId": reference["ID"], "Title": None,
+                              "Type": "core", "ImageIconUrl": reference["ImageIconURL"],
+                              "Achievements": achievements, "Leaderboards": []}]}
+        fixture = Path(tmp) / "reference.json"
+        fixture.write_text(json.dumps(response), encoding="utf-8")
+        (Path(tmp) / "disc").mkdir()
+        (Path(tmp) / "disc/SLUS_216.78").write_bytes(b"\x7fELF" + bytes(60))
+        arguments += [tmp, str(fixture), str(len(achievements)), str(award)]
+        environment = {k: v for k, v in os.environ.items() if not k.startswith("BT3_")}
+        environment["BT3_SAVES"] = str(Path(tmp) / "clean-saves")
+    subprocess.run(arguments, check=True, timeout=30, env=environment)

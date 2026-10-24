@@ -11,6 +11,8 @@ extern "C" {
  * Nothing (including account tokens) is persisted. Disabled until login. */
 typedef uint32_t (*RaClientReadMemory)(uint32_t address, uint8_t *buffer,
                                       uint32_t bytes, void *userdata);
+/* Verified temporary object is absent. No destination bytes are written. */
+#define RA_MEMORY_UNAVAILABLE UINT32_MAX
 typedef struct RaClientStatus {
     int available, enabled, logging_in, logged_in, loading, game_loaded, eligible;
     uint32_t game_id, unlocked, total, unsupported;
@@ -32,7 +34,8 @@ void RaClient_GetStatus(RaClientStatus *status);
 /* Call once per emulated frame, including idle frames. hash must be the verified
  * 32-digit RA hash of the player's original executable. eligible must remain 0
  * until the memory mapping/content/cheat checks have passed. The callback must
- * return 0 for unavailable reads, never fabricate a zero-filled RAM image.
+ * return 0 for unknown addresses and RA_MEMORY_UNAVAILABLE for verified fields
+ * of an absent temporary object; never fabricate a zero-filled RAM image.
  * An ineligible frame unloads the game; no achievement evaluation takes place. */
 void RaClient_Tick(RaClientReadMemory read_memory, void *userdata,
                    const char *hash, int eligible, const char *blocked_reason);

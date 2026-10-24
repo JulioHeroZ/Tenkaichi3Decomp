@@ -17,19 +17,32 @@ port allocates them:
 | `0x6B9640..0x6BD63F` | `gSaveData`, `include/sys/save.h` | Pointer-free serialized save, 0x4000 bytes |
 | `0x6AF180 + offsets` | `gProgress`, menu/view headers | Scalar fields at 0x18, 0x2C, 0x3C, 0x84, 0x90, 0x620, 0x624, 0x64C, 0x674 |
 | `0x31E592`, `0x31E59A` | `gLoadScreen`, `include/sys/loading.h` | Loading minigame score and type (u16) |
+| `0x18706C0 + side*0x1600 + 0x9A4/0x9E4 + member*0xA4` | `gBtlChars->chars`, `include/battle/btl_char_mgr.h` | Member IDs and health only (s32), two sides, five members |
+| `0x8C0880` | `gSimDay->msgLine`, `include/menu/menu_q.h` | Current simulation dialogue line (s32, native offset 0x5A0) |
 
 All other reads return unsupported. No arbitrary host pointer or zero-filled RAM
-image is exposed. Existing definitions are fetched unchanged by rc_client.
+image is exposed. Existing definitions and their submission checksums are fetched
+unchanged by rc_client.
 
 The public reference patch in [BT3-Recomp](https://github.com/z3xox/BT3-Recomp/blob/main/docs/retroachievements/bt3-raw-patch.json)
 (blob `961b9d1ab48119943407c1dc7ee95f985d37b917`) contains 153 game achievements plus
-a zero-point unknown-emulator warning. Of those game achievements, **104 use only
-the stable regions above**. The other 49 remain unsupported: 42 depend on fighter
-objects, seven on simulation dialogue state. These objects are allocated/freed
-across mode changes; reading a fabricated zero or stale snapshot can falsely
-satisfy a health or dialogue transition. rc_client eagerly reads shared memory
-references before evaluating condition guards, so guards do not solve this.
-The live set can change; the UI reports the runtime's actual unsupported count.
+a zero-point unknown-emulator warning. All 153 game achievements use the verified
+fields above: 104 stable-object achievements, 42 using fighter objects and seven
+using simulation dialogue. The live set can change; unknown future reads remain
+unsupported and the UI reports the runtime's actual unsupported count.
+
+Temporary objects require a small, documented native-port extension to the pinned
+rcheevos client. A known field whose object is absent returns
+`RC_CLIENT_READ_MEMORY_UNAVAILABLE`, without writing destination bytes. Unlike an
+invalid address (zero bytes read), it does not permanently disable achievements.
+The client skips updating that memory reference and resets/suspends every dependent
+achievement, including dependencies through derived references. Stable-object
+achievements continue. When the object returns, the first actual observation seeds
+both current/prior values; one warm-up frame is skipped before normal evaluation.
+No fabricated zero, stale observation or counter from an earlier object can trigger
+an award. Allocation/free hooks also handle reuse of the same address between ticks.
+This extension is scoped to this softcore integration; leaderboard tracking is off.
+Its changes are listed in `port/third_party/rcheevos/UPSTREAM.md`.
 
 ## Identification, networking and lifecycle
 
@@ -71,12 +84,15 @@ clang -std=c99 -Wall -Wextra -Werror port/src/ra_memory.c port/tests/ra_memory.c
 ./ra_memory_test
 python port/tests/run_ra_client.py
 python port/tests/run_ra_game.py
+# Optional: pass the public reference patch (no network/account used by the test)
+python port/tests/run_ra_client.py /path/to/bt3-raw-patch.json
 ```
 
 The client test compiles the real runtime with a fake transport and no native
 network implementation. It checks login, unsupported reads, a local fixture
 unlock, retry after connection failure, softcore flags, cancellation, account
-isolation, game-load failure recovery without a second login and shutdown.
+isolation, game-load failure recovery without a second login, temporary-object
+destruction/recreation, delta safety, hit-count resets, derived references and shutdown.
 It never contacts RetroAchievements or awards a real
 account. SDL3 and a C compiler are required; `SDL3_CFLAGS` and `SDL3_LIBS` can select
 an installation. `BT3_TEST_TMPDIR` selects a writable test output directory.
@@ -86,8 +102,8 @@ null pointers, adjacent regions, holes, malformed descriptors, overflow and
 preserving the destination on failure.
 
 The game-adapter test runs production mapping and identification code against
-synthetic native objects. It checks actual Save/Progress/loading reads, rejects
-unmapped transient objects and pointer fields, compares the executable hash with
+synthetic native objects. It checks actual Save/Progress/loading/fighter/dialogue
+reads, absent and recreated objects, and rejects unverified neighboring fields, compares the executable hash with
 Python's independent hashlib result, rejects invalid/empty executables, and
 checks data-verification/netplay/speed/clash/rollback/Unlock Everything gates,
 refusal during an active account session, marker-write failure, the taint marker
@@ -96,6 +112,12 @@ It requires an x86-64 Linux or Windows host, but no disc, SDL or account.
 
 `.github/workflows/retroachievements.yml` runs all offline checks and builds both
 complete release archives in the project's official Docker toolchain.
+It downloads the pinned public reference blob, verifies its Git object hash, then
+tests all 153 game definitions through the production adapter/client with a fake
+transport. This checks zero unsupported references with temporary objects absent,
+safe fighter destruction/recreation under active tournament guards, and a valid
+health transition unlocking the actual tournament definition. The synthetic
+unknown-emulator warning is excluded. No account or game data is used.
 
 A separate copy of an installed Windows build was observed for 30 seconds without
 a window. Its relocated Progress/Save object offsets agree with these source
@@ -106,8 +128,10 @@ with isolated saves and a copy of the player's original data: original-data
 verification passed, 1,784 vertical blanks elapsed, all 12 expected memory regions
 were registered, and the executable hash was
 `18df2548cc72b98287170b19f73c502b`. No account login or real award was attempted.
-Interactive settings UI and live-account acceptance are still required before
-treating this branch as release-ready.
+The player subsequently signed in through the settings UI and confirmed that a
+legitimate achievement unlocked in the game and appeared on the RetroAchievements
+site. That live acceptance used the initial 104-achievement build; expanded battle
+and dialogue mapping still needs a rebuilt executable and live acceptance.
 
 References: [rc_client integration](https://github.com/RetroAchievements/rcheevos/wiki/rc_client-integration),
 [PS2 game page](https://retroachievements.org/game/20590), issues

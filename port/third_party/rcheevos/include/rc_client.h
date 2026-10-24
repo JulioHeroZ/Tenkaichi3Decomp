@@ -24,6 +24,12 @@ typedef struct rc_client_async_handle_t rc_client_async_handle_t;
  */
 typedef uint32_t (RC_CCONV *rc_client_read_memory_func_t)(uint32_t address, uint8_t* buffer, uint32_t num_bytes, rc_client_t* client);
 
+/* Tenkaichi native-port extension. A verified address whose owning object does
+ * not currently exist. No bytes are written. Dependent achievements are reset
+ * and suspended until the object returns; this is not an invalid address.
+ * Only used by the softcore native integration, with leaderboards disabled. */
+#define RC_CLIENT_READ_MEMORY_UNAVAILABLE UINT32_MAX
+
 /**
  * Internal method passed to rc_client_server_call_t to process the server response.
  */

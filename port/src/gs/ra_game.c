@@ -1,7 +1,7 @@
 /* The existing PS2 set addresses stable objects at their console addresses.
  * Resolve those objects by identity, not by assuming a heap relocation applies
- * to every allocation. Battle/simulation objects remain unsupported for now:
- * their lifetimes cannot be represented safely by fabricating empty memory. */
+ * to every allocation. Missing temporary objects suspend dependent achievements
+ * without supplying a fabricated RAM value. */
 #include "ra_game.h"
 #include "ra_client.h"
 #include "../ra_memory.h"
@@ -26,6 +26,8 @@
 #endif
 extern const unsigned char raProgressSlot[4] __asm__(GAME_SYMBOL("gProgress"));
 extern const unsigned char raSaveSlot[4] __asm__(GAME_SYMBOL("gSaveData"));
+extern const unsigned char raFightersSlot[4] __asm__(GAME_SYMBOL("gBtlChars"));
+extern const unsigned char raSimDaySlot[4] __asm__(GAME_SYMBOL("gSimDay"));
 extern const unsigned char raLoadScreen[] __asm__(GAME_SYMBOL("gLoadScreen"));
 extern int Port_DataState(void), Port_NetSession(void), Port_GameSpeed(void);
 extern int Port_ClashSquare(void);
@@ -38,6 +40,9 @@ static RaMemory sMemory = {sRegions, 0};
 static char sHash[33];
 static int sHashTried, sTainted, sTaintChecked;
 static char sTaintPath[1200];
+static int sTransientReset = 1;
+
+void PortRa_TransientReset(void) { sTransientReset = 1; }
 
 static int taint_path(char *path, size_t size) {
     const char *root = getenv("BT3_SAVES");
@@ -122,7 +127,35 @@ static int map_memory(void) {
     return RaMemory_Validate(&sMemory);
 }
 static uint32_t read_memory(uint32_t address, uint8_t *buffer, uint32_t bytes, void *unused) {
+    uint32_t object, field;
+    size_t side, member, kind;
     (void)unused;
+    if (!buffer || !bytes) return 0;
+    /* Only pointer-free s32 member IDs/health gauges are exposed. The roster
+     * pointer is a four-byte game pointer, not a host pointer. */
+    for (side = 0; side < 2; ++side) {
+        for (member = 0; member < 5; ++member) {
+            for (kind = 0; kind < 2; ++kind) {
+                uint32_t offset = (uint32_t)(side * 0x1600 + 0x9a4 + member * 0xa4 + kind * 0x40);
+                field = 0x018706c0 + offset;
+                if (address < field || address - field >= 4 || bytes > 4 - (address - field)) continue;
+                object = slot(raFightersSlot);
+                if (object && slot(Port_Ptr(object)) >= 2)
+                    object = slot((const unsigned char *)Port_Ptr(object) + 4);
+                else object = 0;
+                if (!object || sTransientReset) return RA_MEMORY_UNAVAILABLE;
+                memcpy(buffer, (const unsigned char *)Port_Ptr(object) + offset + address - field, bytes);
+                return bytes;
+            }
+        }
+    }
+    field = 0x008c0880; /* SimDay.msgLine, +0x5a0 (menu/menu_q.h). */
+    if (address >= field && address - field < 4 && bytes <= 4 - (address - field)) {
+        object = slot(raSimDaySlot);
+        if (!object || sTransientReset) return RA_MEMORY_UNAVAILABLE;
+        memcpy(buffer, (const unsigned char *)Port_Ptr(object) + 0x5a0 + address - field, bytes);
+        return bytes;
+    }
     return RaMemory_Read(&sMemory, address, buffer, bytes);
 }
 static int hash_executable(void) {
@@ -175,4 +208,5 @@ void PortRa_Tick(void) {
     }
     if (!reason && !sHash[0]) reason = "Cannot identify the original SLUS_216.78 executable.";
     RaClient_Tick(read_memory, NULL, sHash, reason == NULL, reason);
+    sTransientReset = 0;
 }

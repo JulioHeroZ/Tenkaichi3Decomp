@@ -79,9 +79,9 @@ See [docs/port/README.md](docs/port/README.md) for the running log of what is do
 ## Requirements
 
 RetroAchievements integration is experimental: F1 > Achievements signs into an
-account and tracks softcore unlocks for the mapped save, menu and loading-screen
-conditions. Battle and simulation dialogue conditions are currently unsupported;
-hardcore and leaderboards are disabled. See
+account and tracks softcore unlocks for mapped save, menu, loading-screen,
+battle and simulation dialogue conditions. Temporary objects suspend dependent
+achievements until they exist. Hardcore and leaderboards are disabled. See
 [the integration notes](docs/port/retroachievements.md) for scope and validation status.
 
 - A 64-bit x86 processor and a graphics card with Vulkan support. Most of the work is on the processor (the

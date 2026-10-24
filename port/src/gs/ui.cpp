@@ -1691,7 +1691,7 @@ static void achievements_tab(void) {
     RaClientStatus ra;
     RaClient_GetStatus(&ra);
     ImGui::TextUnformatted("RetroAchievements (experimental, softcore)");
-    ImGui::TextWrapped("This build maps save, menu and loading-screen achievements. Battle and simulation dialogue achievements remain unsupported.");
+    ImGui::TextWrapped("Save, menu, loading-screen, battle and simulation dialogue achievements are mapped. Achievements that need a temporary object wait until it exists.");
     if (!ra.available) {
         ImGui::TextWrapped("RetroAchievements could not initialize.");
         return;

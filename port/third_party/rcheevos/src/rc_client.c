@@ -5875,6 +5875,12 @@ static void rc_client_invalidate_processing_memref(rc_client_t* client)
   client->state.processing_memref = NULL;
 }
 
+static void rc_client_unavailable_processing_memref(rc_client_t* client)
+{
+  if (client->state.processing_memref)
+    client->state.processing_memref->unavailable = 1;
+}
+
 static uint32_t rc_client_peek_le(uint32_t address, uint32_t num_bytes, void* ud)
 {
   rc_client_t* client = (rc_client_t*)ud;
@@ -5892,7 +5898,9 @@ static uint32_t rc_client_peek_le(uint32_t address, uint32_t num_bytes, void* ud
       return value;
   }
 
-  if (num_read < num_bytes)
+  if (num_read == RC_CLIENT_READ_MEMORY_UNAVAILABLE)
+    rc_client_unavailable_processing_memref(client);
+  else if (num_read < num_bytes)
     rc_client_invalidate_processing_memref(client);
 
   return 0;
@@ -5934,7 +5942,9 @@ static uint32_t rc_client_peek(uint32_t address, uint32_t num_bytes, void* ud)
       break;
   }
 
-  if (num_read < num_bytes)
+  if (num_read == RC_CLIENT_READ_MEMORY_UNAVAILABLE)
+    rc_client_unavailable_processing_memref(client);
+  else if (num_read < num_bytes)
     rc_client_invalidate_processing_memref(client);
 
   return 0;
@@ -5988,16 +5998,29 @@ static void rc_client_update_memref_values(rc_client_t* client) {
     uint32_t value;
 
     for (; memref < memref_stop; ++memref) {
+      const int was_unavailable = memref->unavailable & 1;
       if (memref->value.type == RC_VALUE_TYPE_NONE)
         continue;
 
       /* if processing_memref is set, and the memory read fails, all dependent achievements will be disabled */
       client->state.processing_memref = memref;
+      memref->unavailable = 0;
 
       value = rc_peek_value(memref->address, memref->value.size, client->state.legacy_peek, client);
 
       if (client->state.processing_memref) {
-        rc_update_memref_value(&memref->value, value);
+        /* A missing object contributes no value, delta or hit count. Seed the
+         * first actual observation so a new object cannot look like a death. */
+        if (memref->unavailable)
+          continue;
+        if (was_unavailable) {
+          memref->value.value = memref->value.prior = value;
+          memref->value.changed = 0;
+          memref->unavailable = 2;
+        }
+        else {
+          rc_update_memref_value(&memref->value, value);
+        }
       }
       else {
         /* if the peek function cleared the processing_memref, the memref was invalidated */
@@ -6016,15 +6039,60 @@ static void rc_client_update_memref_values(rc_client_t* client) {
       rc_modified_memref_t* modified_memref = modified_memref_list->items;
       const rc_modified_memref_t* modified_memref_stop = modified_memref + modified_memref_list->count;
 
-      for (; modified_memref < modified_memref_stop; ++modified_memref)
-        rc_update_memref_value(&modified_memref->memref.value, rc_get_modified_memref_value(modified_memref, client->state.legacy_peek, client));
+      for (; modified_memref < modified_memref_stop; ++modified_memref) {
+        const int was_unavailable = modified_memref->memref.unavailable & 1;
+        uint32_t value;
+        if (modified_memref->memref.value.type == RC_VALUE_TYPE_NONE)
+          continue;
+        modified_memref->memref.unavailable =
+          (rc_operand_is_memref(&modified_memref->parent) ? modified_memref->parent.value.memref->unavailable : 0) |
+          (rc_operand_is_memref(&modified_memref->modifier) ? modified_memref->modifier.value.memref->unavailable : 0);
+        if (modified_memref->memref.unavailable & 1)
+          continue;
+        client->state.processing_memref = &modified_memref->memref;
+        value = rc_get_modified_memref_value(modified_memref, client->state.legacy_peek, client);
+        if (!client->state.processing_memref) {
+          invalidated_memref = 1;
+          continue;
+        }
+        if (modified_memref->memref.unavailable & 1)
+          continue;
+        if (was_unavailable || modified_memref->memref.unavailable) {
+          modified_memref->memref.value.value = modified_memref->memref.value.prior = value;
+          modified_memref->memref.value.changed = 0;
+          modified_memref->memref.unavailable = 2;
+        }
+        else {
+          rc_update_memref_value(&modified_memref->memref.value, value);
+        }
+      }
 
       modified_memref_list = modified_memref_list->next;
     } while (modified_memref_list);
   }
+  client->state.processing_memref = NULL;
 
   if (invalidated_memref)
     rc_client_update_active_achievements(client->game);
+}
+
+static int rc_client_trigger_memory_unavailable(rc_client_t* client, const rc_trigger_t* trigger)
+{
+  rc_memref_list_t* list = &client->game->runtime.memrefs->memrefs;
+  rc_modified_memref_list_t* modified = &client->game->runtime.memrefs->modified_memrefs;
+  for (; list; list = list->next) {
+    uint16_t i;
+    for (i = 0; i < list->count; ++i)
+      if (list->items[i].unavailable && rc_trigger_contains_memref(trigger, &list->items[i]))
+        return 1;
+  }
+  for (; modified; modified = modified->next) {
+    uint16_t i;
+    for (i = 0; i < modified->count; ++i)
+      if (modified->items[i].memref.unavailable && rc_trigger_contains_memref(trigger, &modified->items[i].memref))
+        return 1;
+  }
+  return 0;
 }
 
 static void rc_client_do_frame_process_achievements(rc_client_t* client, rc_client_subset_info_t* subset)
@@ -6039,6 +6107,15 @@ static void rc_client_do_frame_process_achievements(rc_client_t* client, rc_clie
 
     if (!trigger || achievement->public_.state != RC_CLIENT_ACHIEVEMENT_STATE_ACTIVE)
       continue;
+
+    if (rc_client_trigger_memory_unavailable(client, trigger)) {
+      if (trigger->state == RC_TRIGGER_STATE_PRIMED) {
+        achievement->pending_events |= RC_CLIENT_ACHIEVEMENT_PENDING_EVENT_CHALLENGE_INDICATOR_HIDE;
+        subset->pending_events |= RC_CLIENT_SUBSET_PENDING_EVENT_ACHIEVEMENT;
+      }
+      rc_reset_trigger(trigger);
+      continue;
+    }
 
     old_measured_value = trigger->measured_value;
     old_state = trigger->state;
