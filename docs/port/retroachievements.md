@@ -130,8 +130,19 @@ were registered, and the executable hash was
 `18df2548cc72b98287170b19f73c502b`. No account login or real award was attempted.
 The player subsequently signed in through the settings UI and confirmed that a
 legitimate achievement unlocked in the game and appeared on the RetroAchievements
-site. That live acceptance used the initial 104-achievement build; expanded battle
-and dialogue mapping still needs a rebuilt executable and live acceptance.
+site. That live unlock used the initial 104-achievement build.
+
+The expanded implementation at `9c6b5c2` passed all offline checks, including the
+153-definition production reference test, and complete Windows/Linux release
+builds in [run 40100268348](https://github.com/JulioHeroZ/Tenkaichi3Decomp/actions/runs/40100268348).
+Its Windows executable ran for 30 seconds in both normal and diagnostic-battle
+modes with copied original data and isolated saves. Normal mode passed data
+verification, registered the stable regions and produced the expected executable
+hash. In diagnostic battle mode, 107 samples observed two fighter objects with
+member IDs 0/37; opponent health changed from 40000 to 31920 at the mapped offsets,
+in agreement with the game's own trace. Diagnostic runs correctly remain
+ineligible for achievements. The expanded live-account set-loading check is pending;
+not every battle/dialogue challenge has received individual live gameplay acceptance.
 
 References: [rc_client integration](https://github.com/RetroAchievements/rcheevos/wiki/rc_client-integration),
 [PS2 game page](https://retroachievements.org/game/20590), issues
