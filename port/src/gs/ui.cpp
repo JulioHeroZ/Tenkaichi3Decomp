@@ -18,6 +18,13 @@
 #include "menu_translation.h"
 #include "../quit_dialog.h"
 #include "net_chat.h"
+#include "ra_client.h"
+
+static char sRaUsername[128], sRaPassword[256];
+static void ra_clear_password(void) {
+    volatile char *p = sRaPassword;
+    for (size_t i = 0; i < sizeof(sRaPassword); ++i) p[i] = 0;
+}
 
 static int sMeter = -1; // the meter (frame rate, connection): -1 not read yet
 static bool meter_on(void);
@@ -591,6 +598,7 @@ static void input_owner(void) {
 }
 
 static void set_open(bool open) {
+    if (!open) ra_clear_password();
     if (open && sChat) {
         chat_close();
     }
@@ -1679,6 +1687,41 @@ extern "C" int Port_GameSpeed(void);          // plat_stub.c: the player's own g
 extern "C" void Port_GameSpeedSet(int percent);
 extern "C" void Port_AudioRefresh(void);
 
+static void achievements_tab(void) {
+    RaClientStatus ra;
+    RaClient_GetStatus(&ra);
+    ImGui::TextUnformatted("RetroAchievements (experimental, softcore)");
+    ImGui::TextWrapped("This build maps save, menu and loading-screen achievements. Battle and simulation dialogue achievements remain unsupported.");
+    if (!ra.available) {
+        ImGui::TextWrapped("RetroAchievements could not initialize.");
+        return;
+    }
+    if (ra.logged_in) {
+        ImGui::Text("Signed in as %s", ra.username);
+        if (ImGui::Button("Sign out")) { RaClient_RequestLogout(); ra_clear_password(); }
+    } else {
+        ImGui::BeginDisabled(ra.logging_in != 0);
+        ImGui::InputText("Username", sRaUsername, sizeof(sRaUsername));
+        ImGui::InputText("Password", sRaPassword, sizeof(sRaPassword), ImGuiInputTextFlags_Password);
+        if (ImGui::Button("Sign in")) {
+            RaClient_RequestLogin(sRaUsername, sRaPassword);
+            ra_clear_password();
+        }
+        ImGui::EndDisabled();
+        if (ra.logging_in) ImGui::TextUnformatted("Signing in...");
+        ImGui::TextWrapped("Credentials are sent directly to RetroAchievements over HTTPS. Password and session token are not saved to disk.");
+        if (ImGui::Button("Create a RetroAchievements account")) SDL_OpenURL("https://retroachievements.org/createaccount.php");
+    }
+    if (ra.loading) ImGui::TextUnformatted("Loading achievements...");
+    if (ra.game_loaded) {
+        ImGui::TextUnformatted(ra.game_title);
+        ImGui::Text("%u / %u unlocked; %u unsupported", ra.unlocked, ra.total, ra.unsupported);
+    }
+    if (ra.blocked_reason[0]) ImGui::TextWrapped("%s", ra.blocked_reason);
+    if (ra.error[0]) ImGui::TextWrapped("%s", ra.error);
+    ImGui::TextWrapped("Hardcore and leaderboards are disabled. A modified game, scripted replay, netplay, Unlock Everything, altered game speed or clash assistance suspends achievement processing.");
+}
+
 static void cheats_tab(void) {
     {
         int speed = Port_GameSpeed();
@@ -1959,7 +2002,7 @@ static void build(void) {
         open = false;
     }
     if (sForceTab < 0 && (pad_pressed(ImGuiKey_GamepadL1) || pad_pressed(ImGuiKey_GamepadR1))) {
-        sForceTab = (sTab + (ImGui::IsKeyPressed(ImGuiKey_GamepadL1, false) ? 6 : 1)) % 7;
+        sForceTab = (sTab + (ImGui::IsKeyPressed(ImGuiKey_GamepadL1, false) ? 7 : 1)) % 8;
         sPadTab = true;
     }
     ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
@@ -2024,6 +2067,7 @@ static void build(void) {
             }
             if (tab("Cheats", 5)) { cheats_tab(); ImGui::EndTabItem(); }
             if (tab("Misc", 6)) { misc_tab(); ImGui::EndTabItem(); }
+            if (tab("Achievements", 7)) { achievements_tab(); ImGui::EndTabItem(); }
             ImGui::EndTabBar();
         }
         ImGui::EndChild();
@@ -2522,10 +2566,13 @@ static bool frame_build(void) {
     }
     bool banner = sReady && sBanner[0] != '\0';
     Uint64 now = SDL_GetTicks();
+    RaClientStatus ra;
+    RaClient_GetStatus(&ra);
+    bool achievement = ra.notification_time_ms != 0 && now >= ra.notification_time_ms && now - ra.notification_time_ms < 6000;
     bool saving = save_icon_on(now) && sReady && gUiPresentW > 0 && gUiPresentH > 0;
     meter_count();
     sBuilt = false;
-    if (!sReady || (!sOpen && !sQuit && !notice && !overlay && !meter && !names && !bars && !chat && !banner && !saving)) {
+    if (!sReady || (!sOpen && !sQuit && !notice && !overlay && !meter && !names && !bars && !chat && !banner && !saving && !achievement)) {
         return false;
     }
     if (sPadHold && sCapKind != 2) { // a binding was taken: the controller works the window again once nothing is held
@@ -2645,6 +2692,20 @@ static bool frame_build(void) {
         if (ImGui::Begin("##notice", NULL, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoInputs |
                                                ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoSavedSettings)) {
             ImGui::TextUnformatted(sNotice);
+        }
+        ImGui::End();
+    }
+    if (achievement) {
+        ImGuiIO &io = ImGui::GetIO();
+        ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x - U(20), U(20)), ImGuiCond_Always, ImVec2(1, 0));
+        ImGui::SetNextWindowBgAlpha(0.9f);
+        if (ImGui::Begin("##ra_unlock", NULL, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+                         ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoSavedSettings)) {
+            ImGui::Text("Achievement unlocked (+%u)", ra.notification_points);
+            ImGui::TextUnformatted(ra.notification_title);
+            ImGui::PushTextWrapPos(U(360));
+            ImGui::TextUnformatted(ra.notification_description);
+            ImGui::PopTextWrapPos();
         }
         ImGui::End();
     }
